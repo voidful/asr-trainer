@@ -7,6 +7,10 @@ xls-r fine-tuning script modify from https://huggingface.co/blog/fine-tune-xlsr-
 
 ## example usage
 
-`pip install -r requirements.txt`
+`pip install -r requirements.txt`    
+`python -m torch.distributed.launch --nproc_per_node=2 train.py --common_voice_subset zh-TW --tokenize_config voidful/wav2vec2-large-xlsr-53-tw-gpt --xlsr_config facebook/wav2vec2-xls-r-300m --batch 10 --group_by_length --max_input_length_in_sec 20`
 
-`python train.py --common_voice_subset zh-TW --tokenize_config voidful/wav2vec2-large-xlsr-53-tw-gpt --xlsr_config facebook/wav2vec2-xls-r-300m`
+## sweep usage
+
+`python -m wandb sweep ./sweep_xxx.yaml`
+`python -m wandb agent xxxxxxxxxxxxxx`

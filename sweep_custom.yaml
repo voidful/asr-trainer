@@ -1,0 +1,59 @@
+program: train.py
+project: xlsr-trainer
+method: random
+metric:
+  name: eval/loss
+  goal: minimize
+parameters:
+  attention_dropout:
+    distribution: log_uniform
+    # from 0.1/5 to 0.1*5 - values provided are ln(min) -> ln(max)
+    min: -3.9
+    max: -0.7
+  activation_dropout:
+    distribution: log_uniform
+    min: -3.9
+    max: -1.9
+  feat_proj_dropout:
+    distribution: log_uniform
+    min: -3.9
+    max: -0.7
+  feat_quantizer_dropout:
+    distribution: log_uniform
+    min: -3.9
+    max: -0.7
+  final_dropout:
+    distribution: log_uniform
+    min: -3.9
+    max: -0.7
+  hidden_dropout:
+    distribution: log_uniform
+    min: -3.9
+    max: -1.9
+  learning_rate:
+    distribution: log_uniform
+    min: -9.2
+    max: -6.9
+command:
+  - python3
+  - ${program}
+  - "--custom_set"
+  - "./custom_data.csv"
+  - "--tokenize_config"
+  - "voidful/wav2vec2-large-xlsr-53-tw-gpt"
+  - "--xlsr_config"
+  - "facebook/wav2vec2-xls-r-1b"
+  - "--sweep_split_shard"
+  - 90
+  - "--logging_steps"
+  - 10
+  - "--eval_steps"
+  - 100
+  - "--output_dir"
+  - "./model_sweep"
+  - "--overwrite_output_dir"
+  - "--num_train_epochs"
+  - 20
+  - "--batch"
+  - 8
+  - ${args}
