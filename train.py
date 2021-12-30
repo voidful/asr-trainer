@@ -1,3 +1,4 @@
+# region libraries
 import argparse
 import os
 import sys
@@ -19,6 +20,8 @@ from transformers import Trainer
 _HIDDEN_STATES_START_POSITION = 2
 from transformers.modeling_outputs import CausalLMOutput
 
+
+# endregion libraries
 
 def main(arg=None):
     def parse_args(args):
@@ -306,15 +309,16 @@ def main(arg=None):
         length_column_name="lengths",
         group_by_length=input_arg["group_by_length"],
         per_device_train_batch_size=int(input_arg['batch']),
-        per_device_eval_batch_size=int(input_arg['batch']),
+        per_device_eval_batch_size=int(input_arg['batch']) - 1,
         gradient_accumulation_steps=int(input_arg['grad_accum']),
+        eval_accumulation_steps=int(input_arg['grad_accum']) - 1,
         evaluation_strategy="steps",
         overwrite_output_dir=input_arg.get("overwrite_output_dir", False),
         load_best_model_at_end=True,
         num_train_epochs=input_arg.get('num_train_epochs', 60),
         gradient_checkpointing=True,
         fp16=True,
-        save_steps=input_arg.get('eval_steps', 400),
+        save_steps=input_arg.get('eval_steps', 400),  # avoid to get nothing but a out of memory message  !!
         eval_steps=input_arg.get('eval_steps', 400),
         logging_steps=input_arg.get('logging_steps', 200),
         learning_rate=input_arg.get('learning_rate', 2.34e-4),
