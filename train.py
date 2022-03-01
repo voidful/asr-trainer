@@ -27,6 +27,7 @@ def main(arg=None):
     def parse_args(args):
         parser = argparse.ArgumentParser()
         parser.add_argument("--custom_set", type=str)
+        parser.add_argument("--common_voice_set", default='mozilla-foundation/common_voice_8_0', type=str)
         parser.add_argument("--common_voice_subset", type=str)
         parser.add_argument("--tokenize_config", type=str,
                             default="voidful/wav2vec2-large-xlsr-53-tw-gpt")
@@ -37,6 +38,7 @@ def main(arg=None):
         parser.add_argument("--logging_steps", type=int)
         parser.add_argument("--eval_steps", type=int)
         parser.add_argument("--output_dir", type=str)
+        parser.add_argument("--checkpoint", type=str)
         parser.add_argument("--overwrite_output_dir", action="store_true")
         parser.add_argument("--group_by_length", action="store_true")
         parser.add_argument("--grad_accum", type=int, default=2)
@@ -49,6 +51,7 @@ def main(arg=None):
         parser.add_argument("--final_dropout", type=float)
         parser.add_argument("--hidden_dropout", type=float)
         parser.add_argument("--learning_rate", type=float)
+        parser.add_argument("--resume", type=str)
         input_arg, model_arg = parser.parse_known_args(args)
         input_arg = {k: v for k, v in vars(input_arg).items() if v is not None}
         other_arg = {k.replace("--", ""): v for k, v in zip(model_arg[:-1:2], model_arg[1::2])}
@@ -253,8 +256,10 @@ def main(arg=None):
             data_train.save_to_disk(cache_file_train)
             data_test.save_to_disk(cache_file_test)
     elif 'common_voice_subset' in input_arg:
-        data_train = load_dataset("common_voice", input_arg['common_voice_subset'], split="train+validation")
-        data_test = load_dataset("common_voice", input_arg['common_voice_subset'], split="test")
+        data_train = load_dataset(input_arg['common_voice_set'], input_arg['common_voice_subset'],
+                                  split="train+validation", use_auth_token=True)
+        data_test = load_dataset(input_arg['common_voice_set'], input_arg['common_voice_subset'], split="test",
+                                 use_auth_token=True)
         data_train = data_train.remove_columns(
             ["accent", "age", "client_id", "down_votes", "gender", "locale", "segment", "up_votes"])
         data_test = data_test.remove_columns(
@@ -313,6 +318,7 @@ def main(arg=None):
         gradient_accumulation_steps=int(input_arg['grad_accum']),
         eval_accumulation_steps=int(input_arg['grad_accum']) - 1,
         evaluation_strategy="steps",
+        resume_from_checkpoint=input_arg.get("checkpoint", False),
         overwrite_output_dir=input_arg.get("overwrite_output_dir", False),
         load_best_model_at_end=True,
         num_train_epochs=input_arg.get('num_train_epochs', 60),
@@ -337,7 +343,7 @@ def main(arg=None):
         tokenizer=processor.feature_extractor,
     )
 
-    trainer.train()
+    trainer.train(input_arg.get("resume", None))
 
 
 if __name__ == "__main__":
