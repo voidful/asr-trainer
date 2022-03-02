@@ -239,22 +239,29 @@ def main(arg=None):
     # data set
     if 'custom_set' in input_arg:
         cache_file_train = f"{input_arg['custom_set']}_hf_train.data"
-        cache_file_test = f"{input_arg['custom_set']}_hf_test.data"
-        if os.path.isdir(cache_file_train) and os.path.isdir(cache_file_test):
+        if os.path.isdir(cache_file_train):
             data_train = load_dataset('csv', data_files=input_arg['custom_set'])['train']
-            data_test = load_dataset('csv', data_files=input_arg['custom_set'])['train']
             data_train = data_train.load_from_disk(cache_file_train)
-            data_test = data_test.load_from_disk(cache_file_test)
         else:
             dataset = load_dataset('csv', data_files=input_arg['custom_set'], cache_dir='./.cache')
             dataset = dataset['train']
             dataset = dataset.train_test_split(test_size=0.1)
             data_train = dataset['train']
-            data_test = dataset['test']
             data_train = data_train.map(prepare_dataset_custom, keep_in_memory=False, num_proc=input_arg["num_proc"])
-            data_test = data_test.map(prepare_dataset_custom, keep_in_memory=False, num_proc=input_arg["num_proc"])
             data_train.save_to_disk(cache_file_train)
+
+        cache_file_test = f"{input_arg['custom_set']}_hf_test.data"
+        if os.path.isdir(cache_file_test):
+            data_test = load_dataset('csv', data_files=input_arg['custom_set'])['train']
+            data_test = data_test.load_from_disk(cache_file_test)
+        else:
+            dataset = load_dataset('csv', data_files=input_arg['custom_set'], cache_dir='./.cache')
+            dataset = dataset['train']
+            dataset = dataset.train_test_split(test_size=0.1)
+            data_test = dataset['test']
+            data_test = data_test.map(prepare_dataset_custom, keep_in_memory=False, num_proc=input_arg["num_proc"])
             data_test.save_to_disk(cache_file_test)
+            
     elif 'common_voice_subset' in input_arg:
         data_train = load_dataset(input_arg['common_voice_set'], input_arg['common_voice_subset'],
                                   split="train+validation", use_auth_token=True)
