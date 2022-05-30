@@ -2,20 +2,22 @@
 import argparse
 import os
 import sys
-
-import editdistance as ed
-import torchaudio
-from datasets import load_dataset, Audio
-import torch
 from dataclasses import dataclass
 from typing import Dict, List, Union
-from transformers import Wav2Vec2FeatureExtractor
-from transformers import Wav2Vec2Processor
-from transformers import Wav2Vec2CTCTokenizer
-from transformers import Wav2Vec2PreTrainedModel, Wav2Vec2Model
+
+import editdistance as ed
+import torch
 import torch.nn as nn
-from transformers import TrainingArguments
+import torchaudio
+from datasets import load_dataset, Audio
 from transformers import Trainer
+from transformers import Trainer, TrainingArguments, EarlyStoppingCallback, AutoTokenizer, TrainerCallback, \
+    TrainerState, TrainerControl
+from transformers import TrainingArguments
+from transformers import Wav2Vec2CTCTokenizer
+from transformers import Wav2Vec2FeatureExtractor
+from transformers import Wav2Vec2PreTrainedModel, Wav2Vec2Model
+from transformers import Wav2Vec2Processor
 
 _HIDDEN_STATES_START_POSITION = 2
 from transformers.modeling_outputs import CausalLMOutput
@@ -27,16 +29,20 @@ def main(arg=None):
     def parse_args(args):
         parser = argparse.ArgumentParser()
         parser.add_argument("--custom_set", type=str)
-        parser.add_argument("--common_voice_set", default='mozilla-foundation/common_voice_8_0', type=str)
-        parser.add_argument("--common_voice_subset", type=str)
-        parser.add_argument("--tokenize_config", type=str,
-                            default="voidful/wav2vec2-large-xlsr-53-tw-gpt")
+        parser.add_argument("--train_set", default='mozilla-foundation/common_voice_8_0', type=str)
+        parser.add_argument("--train_subset", type=str)
+        parser.add_argument("--train_split", type=str)
+        parser.add_argument("--test_set", default='mozilla-foundation/common_voice_8_0', type=str)
+        parser.add_argument("--test_subset", type=str)
+        parser.add_argument("--test_split", type=str)
+        parser.add_argument("--tokenize_config", type=str, default="voidful/wav2vec2-large-xlsr-53-tw-gpt")
         parser.add_argument("--xlsr_config", type=str, default="facebook/wav2vec2-xls-r-1b")
         parser.add_argument("--sweep_split_shard", type=int)
         parser.add_argument("--num_train_epochs", type=int)
         parser.add_argument("--batch", type=int, default=8)
         parser.add_argument("--logging_steps", type=int)
         parser.add_argument("--eval_steps", type=int)
+        parser.add_argument("--phoneme", action="store_true")
         parser.add_argument("--output_dir", type=str)
         parser.add_argument("--checkpoint", type=str)
         parser.add_argument("--overwrite_output_dir", action="store_true")
@@ -51,21 +57,31 @@ def main(arg=None):
         parser.add_argument("--final_dropout", type=float)
         parser.add_argument("--hidden_dropout", type=float)
         parser.add_argument("--learning_rate", type=float)
+        parser.add_argument("--warmup_steps", type=int)
+        parser.add_argument("--save_total_limit", type=int)
         parser.add_argument("--resume", type=str)
         input_arg, model_arg = parser.parse_known_args(args)
         input_arg = {k: v for k, v in vars(input_arg).items() if v is not None}
         other_arg = {k.replace("--", ""): v for k, v in zip(model_arg[:-1:2], model_arg[1::2])}
         return input_arg, other_arg
 
-    def prepare_dataset_cov(batch):
-        audio = batch["audio"]
+    def phonemize_dataset(batch, is_phonemize, backend, separator):
+        if is_phonemize:
+            with processor.as_target_processor():
+                batch["labels"] = processor(backend.phonemize([batch["labels"]], separator=separator)[0]).input_ids
+        else:
+            with processor.as_target_processor():
+                batch["labels"] = processor(batch["labels"]).input_ids
+        return batch
 
-        # batched output is "un-batched"
+    def prepare_dataset_hf(batch):
+        audio = batch["audio"]
         batch["input_values"] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).input_values[0]
         batch["lengths"] = len(batch["input_values"])
-
-        with processor.as_target_processor():
-            batch["labels"] = processor(batch["sentence"]).input_ids
+        if 'sentence' in batch:
+            batch["labels"] = batch["sentence"]
+        else:
+            batch["labels"] = batch["text"]
         return batch
 
     def prepare_dataset_custom(batch):
@@ -77,9 +93,10 @@ def main(arg=None):
         else:
             batch["speech"] = speech.squeeze(0).numpy()
         batch["lengths"] = len(batch["input_values"])
-
-        with processor.as_target_processor():
-            batch["labels"] = tokenizer(batch["text"]).input_ids
+        if 'sentence' in batch:
+            batch["labels"] = batch["sentence"]
+        else:
+            batch["labels"] = batch["text"]
         return batch
 
     def cer_cal(groundtruth, hypothesis):
@@ -112,6 +129,36 @@ def main(arg=None):
         cer = cer_cal(label_str, pred_str)
         wer = wer_cal(label_str, pred_str)
         return {"cer": cer, "wer": wer}
+
+    class FreezingCallback(TrainerCallback):
+        def __init__(self, trainer, freeze_model, freeze_epoch=3):
+            self.trainer = trainer
+            self.freeze_model = freeze_model
+            self.freeze_epoch = freeze_epoch
+            self.current_step_idx = 0
+            self.default_param_fix = {}
+            self.name_list = []
+            for name, param in self.freeze_model.named_parameters():
+                self.name_list.append(name)
+                self.default_param_fix[name] = param.requires_grad
+            self.freeze_layers = int(len(self.default_param_fix.keys()) / freeze_epoch)
+
+        def on_epoch_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+            if state.epoch < self.freeze_epoch:
+                release = self.name_list[-int(self.freeze_layers * state.epoch):]
+                for name, param in self.freeze_model.named_parameters():
+                    if name in release:
+                        param.requires_grad = self.default_param_fix[name]
+                    else:
+                        param.requires_grad = False
+            else:
+                for name, param in self.freeze_model.named_parameters():
+                    param.requires_grad = self.default_param_fix[name]
+            self.current_step_idx += 1
+
+        def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+            for name, param in self.trainer.model.named_parameters():
+                param.requires_grad = True
 
     class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
         def __init__(self, config):
@@ -228,7 +275,7 @@ def main(arg=None):
 
     input_arg, other_arg = parse_args(sys.argv[1:]) if arg is None else parse_args(arg)
     print("input_arg", input_arg)
-    repo_name = f"{input_arg['xlsr_config']}-{input_arg['custom_set'] if 'custom_set' in input_arg else input_arg['common_voice_subset']}"
+    repo_name = f"{input_arg['xlsr_config']}-{input_arg['custom_set'] if 'custom_set' in input_arg else input_arg['train_subset']}"
 
     tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(input_arg['tokenize_config'])
     feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0,
@@ -261,20 +308,36 @@ def main(arg=None):
             data_test = dataset['test']
             data_test = data_test.map(prepare_dataset_custom, keep_in_memory=False, num_proc=input_arg["num_proc"])
             data_test.save_to_disk(cache_file_test)
-            
-    elif 'common_voice_subset' in input_arg:
-        data_train = load_dataset(input_arg['common_voice_set'], input_arg['common_voice_subset'],
-                                  split="train+validation", use_auth_token=True)
-        data_test = load_dataset(input_arg['common_voice_set'], input_arg['common_voice_subset'], split="test",
+    elif 'train_set' in input_arg:
+        data_train = load_dataset(input_arg['train_set'], input_arg['train_subset'],
+                                  split=input_arg['train_split'], use_auth_token=True)
+        data_test = load_dataset(input_arg['test_set'], input_arg['test_subset'], split=input_arg['test_split'],
                                  use_auth_token=True)
-        data_train = data_train.remove_columns(
-            ["accent", "age", "client_id", "down_votes", "gender", "locale", "segment", "up_votes"])
-        data_test = data_test.remove_columns(
-            ["accent", "age", "client_id", "down_votes", "gender", "locale", "segment", "up_votes"])
+        try:
+            data_train = data_train.remove_columns(
+                ["accent", "age", "client_id", "down_votes", "gender", "locale", "segment", "up_votes"])
+            data_test = data_test.remove_columns(
+                ["accent", "age", "client_id", "down_votes", "gender", "locale", "segment", "up_votes"])
+        except:
+            pass
         data_train = data_train.cast_column("audio", Audio(sampling_rate=16_000))
         data_test = data_test.cast_column("audio", Audio(sampling_rate=16_000))
-        data_train = data_train.map(prepare_dataset_cov, remove_columns=data_train.column_names)
-        data_test = data_test.map(prepare_dataset_cov, remove_columns=data_test.column_names)
+        data_train = data_train.map(prepare_dataset_hf, remove_columns=data_train.column_names)
+        data_test = data_test.map(prepare_dataset_hf, remove_columns=data_test.column_names)
+
+    is_phonemize = input_arg['phoneme']
+    if input_arg['phoneme']:
+        from phonemizer.backend import EspeakBackend
+        from phonemizer.separator import Separator
+        separator = Separator(phone="", word="", syllable="")
+        backend = EspeakBackend(language="en-us", language_switch="remove-flags")
+        data_train = data_train.map(phonemize_dataset, fn_kwargs={'is_phonemize': is_phonemize, 'separator': separator,
+                                                                  'backend': backend})
+        data_test = data_test.map(phonemize_dataset,
+                                  fn_kwargs={'is_phonemize': is_phonemize, 'separator': separator, 'backend': backend})
+    else:
+        data_train = data_train.map(phonemize_dataset, fn_kwargs={'is_phonemize': is_phonemize})
+        data_test = data_test.map(phonemize_dataset, fn_kwargs={'is_phonemize': is_phonemize})
 
     if input_arg.get('max_input_length_in_sec', None):
         max_input_length_in_sec = input_arg['max_input_length_in_sec']
@@ -304,13 +367,13 @@ def main(arg=None):
     data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
     model = Wav2Vec2ForCTC.from_pretrained(
         input_arg['xlsr_config'],
-        activation_dropout=input_arg.get('activation_dropout', 0.055),
-        attention_dropout=input_arg.get('attention_dropout', 0.094),
-        feat_proj_dropout=input_arg.get('feat_proj_dropout', 0.1),
-        feat_quantizer_dropout=input_arg.get('feat_quantizer_dropout', 0.04),
-        final_dropout=input_arg.get('final_dropout', 0.1),
-        hidden_dropout=input_arg.get('hidden_dropout', 0.047),
-        layerdrop=0.0,
+        # activation_dropout=input_arg.get('activation_dropout', 0.055),
+        # attention_dropout=input_arg.get('attention_dropout', 0.094),
+        # feat_proj_dropout=input_arg.get('feat_proj_dropout', 0.1),
+        # feat_quantizer_dropout=input_arg.get('feat_quantizer_dropout', 0.04),
+        # final_dropout=input_arg.get('final_dropout', 0.1),
+        # hidden_dropout=input_arg.get('hidden_dropout', 0.047),
+        # layerdrop=0.0,
         ctc_loss_reduction="mean",
         pad_token_id=processor.tokenizer.pad_token_id,
         vocab_size=len(processor.tokenizer),
@@ -321,9 +384,9 @@ def main(arg=None):
         length_column_name="lengths",
         group_by_length=input_arg["group_by_length"],
         per_device_train_batch_size=int(input_arg['batch']),
-        per_device_eval_batch_size=int(input_arg['batch']) - 1,
+        per_device_eval_batch_size=int(input_arg['batch']),
         gradient_accumulation_steps=int(input_arg['grad_accum']),
-        eval_accumulation_steps=int(input_arg['grad_accum']) - 1,
+        eval_accumulation_steps=int(input_arg['grad_accum']),
         evaluation_strategy="steps",
         resume_from_checkpoint=input_arg.get("checkpoint", False),
         overwrite_output_dir=input_arg.get("overwrite_output_dir", False),
@@ -333,11 +396,12 @@ def main(arg=None):
         fp16=True,
         save_steps=input_arg.get('eval_steps', 400),  # avoid to get nothing but a out of memory message  !!
         eval_steps=input_arg.get('eval_steps', 400),
-        logging_steps=input_arg.get('logging_steps', 200),
+        logging_steps=input_arg.get('logging_steps', 10),
         learning_rate=input_arg.get('learning_rate', 2.34e-4),
-        warmup_steps=500,
-        save_total_limit=2,
+        warmup_steps=input_arg.get('warmup_steps', 100),
+        save_total_limit=input_arg.get('save_total_limit', 5),
         push_to_hub=False,
+        report_to="all"
     )
     model.gradient_checkpointing_enable()
     trainer = Trainer(
@@ -350,6 +414,8 @@ def main(arg=None):
         tokenizer=processor.feature_extractor,
     )
 
+    freezing_callback = FreezingCallback(trainer, model, input_arg.get('unfreeze_warmup_steps', 1000))
+    trainer.add_callback(freezing_callback)
     trainer.train(input_arg.get("resume", None))
 
 
