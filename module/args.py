@@ -5,6 +5,7 @@ def parse_args(args):
     parser = argparse.ArgumentParser()
     parser.add_argument("--custom_set_train", type=str)
     parser.add_argument("--custom_set_test", type=str)
+    parser.add_argument("--cache_dir", type=str, default='./.cache')
     parser.add_argument("--train_set", default='mozilla-foundation/common_voice_8_0', type=str)
     parser.add_argument("--train_subset", type=str)
     parser.add_argument("--train_split", type=str)
@@ -36,7 +37,7 @@ def parse_args(args):
     parser.add_argument("--learning_rate", type=float)
     parser.add_argument("--warmup_steps", type=int)
     parser.add_argument("--save_total_limit", type=int)
-    parser.add_argument("--resume", type=str)
+    parser.add_argument("--only_eval", action="store_true")
     input_arg, model_arg = parser.parse_known_args(args)
     input_arg = {k: v for k, v in vars(input_arg).items() if v is not None}
     other_arg = {k.replace("--", ""): v for k, v in zip(model_arg[:-1:2], model_arg[1::2])}

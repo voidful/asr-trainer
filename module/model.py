@@ -47,7 +47,6 @@ class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
 
         hidden_states = outputs[0]
         hidden_states = self.dropout(hidden_states)
-
         logits = self.lm_head(hidden_states)
 
         loss = None
