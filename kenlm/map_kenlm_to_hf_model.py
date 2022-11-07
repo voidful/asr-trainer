@@ -1,9 +1,9 @@
 import argparse
 import sys
 
-from transformers import AutoProcessor
-from pyctcdecode.alphabet import BLANK_TOKEN_PTN, UNK_TOKEN, UNK_TOKEN_PTN, Alphabet
 from pyctcdecode import build_ctcdecoder
+from pyctcdecode.alphabet import BLANK_TOKEN_PTN, UNK_TOKEN, UNK_TOKEN_PTN
+from transformers import AutoProcessor
 from transformers import Wav2Vec2ProcessorWithLM
 
 

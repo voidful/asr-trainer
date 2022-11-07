@@ -15,7 +15,7 @@ def parse_args(args):
     parser.add_argument("--tokenize_config", type=str, default="voidful/wav2vec2-large-xlsr-53-tw-gpt")
     parser.add_argument("--xlsr_config", type=str, default="facebook/wav2vec2-xls-r-1b")
     parser.add_argument("--sweep_split_shard", type=int)
-    parser.add_argument("--num_train_epochs", type=int)
+    parser.add_argument("--epoch", type=int)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--logging_steps", type=int)
     parser.add_argument("--eval_steps", type=int)

@@ -6,52 +6,62 @@ metric:
   goal: minimize
 parameters:
   attention_dropout:
-    distribution: log_uniform
-    # from 0.1/5 to 0.1*5 - values provided are ln(min) -> ln(max)
-    min: -3.9
-    max: -0.7
+    distribution: uniform
+    min: 0
+    max: 1
   activation_dropout:
-    distribution: log_uniform
-    min: -3.9
-    max: -1.9
+    distribution: uniform
+    min: 0
+    max: 1
   feat_proj_dropout:
-    distribution: log_uniform
-    min: -3.9
-    max: -0.7
+    distribution: uniform
+    min: 0
+    max: 1
   feat_quantizer_dropout:
-    distribution: log_uniform
-    min: -3.9
-    max: -0.7
+    distribution: uniform
+    min: 0
+    max: 1
   final_dropout:
-    distribution: log_uniform
-    min: -3.9
-    max: -0.7
+    distribution: uniform
+    min: 0
+    max: 1
   hidden_dropout:
-    distribution: log_uniform
-    min: -3.9
-    max: -1.9
-  learning_rate:
-    distribution: log_uniform
-    min: -9.2
-    max: -6.9
+    distribution: uniform
+    min: 0
+    max: 1
+  warmup_steps:
+    distribution: int_uniform
+    min: 0
+    max: 100
 command:
-  - python3
+  - python
   - ${program}
-  - "--common_voice_subset"
-  - "zh-TW"
   - "--tokenize_config"
-  - "voidful/wav2vec2-large-xlsr-53-tw-gpt"
+  - "./cantokenizer/"
   - "--xlsr_config"
-  - "facebook/wav2vec2-xls-r-1b"
+  - "facebook/wav2vec2-xls-r-300m"
+  - "--group_by_length"
+  - "--train_set"
+  - "mozilla-foundation/common_voice_10_0"
+  - "--train_subset"
+  - "zh-TW"
+  - "--train_split"
+  - "train+validation"
+  - "--test_split"
+  - "test"
+  - "--learning_rate"
+  - 3e-4
+  - "--batch"
+  - 20
   - "--logging_steps"
   - 10
   - "--eval_steps"
-  - 100
+  - 60
+  - "--epoch"
+  - 50
+  - "--use_auth_token"
+  - True
   - "--output_dir"
   - "./model_sweep"
   - "--overwrite_output_dir"
-  - "--num_train_epochs"
-  - 10
-  - "--batch"
-  - 8
   - ${args}

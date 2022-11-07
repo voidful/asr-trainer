@@ -146,5 +146,6 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-./module/normalizer.py
-./module/correction.csv
+kenlm
+sweep_commonvoice.yaml
+runner.sh

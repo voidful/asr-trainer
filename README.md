@@ -43,6 +43,25 @@ python -m torch.distributed.launch --nproc_per_node=2 \
 --eval_step 10000
 ```
 
+```shell
+python -m torch.distributed.launch --nproc_per_node=2 \
+train.py --tokenize_config facebook/hubert-large-ls960-ft \
+--xlsr_config ntu-spml/distilhubert \
+--group_by_length \
+--train_set librispeech_asr \
+--train_subset all \
+--train_split train.clean.100+train.clean.360+train.other.500 \
+--test_split test.other \
+--learning_rate 0.0003 \
+--batch 30 \
+--logging_steps 10 \
+--eval_steps 60 \
+--epoch 150 \
+--use_auth_token True \
+--output_dir ./model_sweep \
+--overwrite_output_dir
+```
+
 ## sweep usage
 
 `python -m wandb sweep ./sweep_xxx.yaml`   
