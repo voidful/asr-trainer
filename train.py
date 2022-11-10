@@ -2,15 +2,20 @@ import sys
 
 import nlp2
 from datasets import load_dataset, Audio
+from transformers import Seq2SeqTrainer
 from transformers import Trainer
 from transformers import TrainingArguments
 from transformers import Wav2Vec2CTCTokenizer
 from transformers import Wav2Vec2FeatureExtractor
 from transformers import Wav2Vec2Processor
+from transformers import WhisperFeatureExtractor
+from transformers import WhisperForConditionalGeneration
+from transformers import WhisperProcessor
+from transformers import WhisperTokenizer
 
 from module.args import parse_args
 from module.data_processing import encode_dataset, DataCollatorCTCWithPadding, prepare_dataset_hf, \
-    prepare_dataset_custom
+    prepare_dataset_custom, DataCollatorSpeechSeq2SeqWithPadding
 from module.metric import cer_cal, wer_cal
 from module.model import Wav2Vec2ForCTC
 from module.utility import FreezingCallback
@@ -19,15 +24,23 @@ from module.utility import FreezingCallback
 def main(arg=None):
     input_arg, other_arg = parse_args(sys.argv[1:]) if arg is None else parse_args(arg)
     print("input_arg", input_arg)
-    repo_name = f"{input_arg['xlsr_config']}-{input_arg['custom_set_train'] if 'custom_set_train' in input_arg else input_arg['train_subset']}"
+    repo_name = f"{input_arg['model_config']}-{input_arg['custom_set_train'] if 'custom_set_train' in input_arg else input_arg['train_subset']}"
     repo_name = repo_name.replace("/", "_")
-    tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(input_arg['tokenize_config'],
-                                                     use_auth_token=input_arg['use_auth_token'])
-    feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0,
-                                                 do_normalize=True,
-                                                 return_attention_mask=True)
-    processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
-    processor.save_pretrained(repo_name)
+
+    if 'openai/whisper' in input_arg['model_config']:
+        feature_extractor = WhisperFeatureExtractor.from_pretrained(input_arg['model_config'])
+        tokenizer = WhisperTokenizer.from_pretrained(input_arg['model_config'], task="transcribe")
+        processor = WhisperProcessor.from_pretrained(input_arg['model_config'], task="transcribe")
+        processor.save_pretrained(repo_name)
+    else:
+        tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(input_arg['tokenize_config'],
+                                                         use_auth_token=input_arg['use_auth_token'])
+        feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0,
+                                                     do_normalize=True,
+                                                     return_attention_mask=True)
+        processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
+        processor.save_pretrained(repo_name)
+
     # data set
     if 'custom_set_train' in input_arg:
         dataset = load_dataset('csv', data_files=input_arg['custom_set_train'], cache_dir=input_arg['cache_dir'])
@@ -147,22 +160,28 @@ def main(arg=None):
         data_train = data_train.shard(num_shards=input_arg.get('sweep_split_shard'), index=0)
         data_test = data_train
 
-    data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
-    model = Wav2Vec2ForCTC.from_pretrained(
-        input_arg['xlsr_config'],
-        activation_dropout=input_arg.get('activation_dropout', 0.01),
-        attention_dropout=input_arg.get('attention_dropout', 0.01),
-        feat_proj_dropout=input_arg.get('feat_proj_dropout', 0.01),
-        feat_quantizer_dropout=input_arg.get('feat_quantizer_dropout', 0.01),
-        final_dropout=input_arg.get('final_dropout', 0.01),
-        hidden_dropout=input_arg.get('hidden_dropout', 0.01),
-        layerdrop=0.0,
-        ctc_loss_reduction="mean",
-        pad_token_id=processor.tokenizer.pad_token_id,
-        vocab_size=len(processor.tokenizer),
-        use_auth_token=input_arg['use_auth_token'],
-        ignore_mismatched_sizes=True
-    )
+    if 'openai/whisper' in input_arg['model_config']:
+        data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
+        model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-small")
+        model.config.forced_decoder_ids = None
+        model.config.suppress_tokens = []
+    else:
+        data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
+        model = Wav2Vec2ForCTC.from_pretrained(
+            input_arg['model_config'],
+            activation_dropout=input_arg.get('activation_dropout', 0.01),
+            attention_dropout=input_arg.get('attention_dropout', 0.01),
+            feat_proj_dropout=input_arg.get('feat_proj_dropout', 0.01),
+            feat_quantizer_dropout=input_arg.get('feat_quantizer_dropout', 0.01),
+            final_dropout=input_arg.get('final_dropout', 0.01),
+            hidden_dropout=input_arg.get('hidden_dropout', 0.01),
+            layerdrop=0.0,
+            ctc_loss_reduction="mean",
+            pad_token_id=processor.tokenizer.pad_token_id,
+            vocab_size=len(processor.tokenizer),
+            use_auth_token=input_arg['use_auth_token'],
+            ignore_mismatched_sizes=True
+        )
     training_args = TrainingArguments(
         output_dir=input_arg.get("output_dir", repo_name),
         length_column_name="lengths",
@@ -207,7 +226,11 @@ def main(arg=None):
         nlp2.write_csv([[l, p, cer_cal([l], [p])] for l, p in zip(label_str, pred_str)], 'pred.csv')
         return {"cer": cer, "wer": wer}
 
-    trainer = Trainer(
+    if 'openai/whisper' in input_arg['model_config']:
+        trainer_class = Seq2SeqTrainer
+    else:
+        trainer_class = Trainer
+    trainer = trainer_class(
         model=model,
         data_collator=data_collator,
         args=training_args,
