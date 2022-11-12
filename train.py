@@ -15,7 +15,7 @@ from transformers import WhisperTokenizer
 
 from module.args import parse_args
 from module.data_processing import encode_dataset, DataCollatorCTCWithPadding, prepare_dataset_hf, \
-    prepare_dataset_custom, DataCollatorSpeechSeq2SeqWithPadding
+    prepare_dataset_custom, DataCollatorSpeechSeq2SeqWithPadding, prepare_dataset_whisper
 from module.metric import cer_cal, wer_cal
 from module.model import Wav2Vec2ForCTC
 from module.utility import FreezingCallback
@@ -79,6 +79,12 @@ def main(arg=None):
         data_test = data_test.map(prepare_dataset_hf, fn_kwargs={'processor': processor},
                                   remove_columns=data_test.column_names)
 
+    if 'openai/whisper' in input_arg['model_config']:
+        data_train = data_train.map(prepare_dataset_whisper, fn_kwargs={'feature_extractor': feature_extractor},
+                                    num_proc=input_arg["num_proc"])
+        data_test = data_test.map(prepare_dataset_whisper, fn_kwargs={'feature_extractor': feature_extractor},
+                                  num_proc=input_arg["num_proc"])
+
     print("init dataset")
     print("data train", data_train)
     print("data test", data_test)
@@ -119,25 +125,26 @@ def main(arg=None):
         print("data train", data_train)
         print("data test", data_test)
         is_phonemize = input_arg['phoneme']
-        if is_phonemize:
-            from phonemizer.backend import EspeakBackend
-            from phonemizer.separator import Separator
-            separator = Separator(phone="", word="", syllable="")
-            backend = EspeakBackend(language="en-us", language_switch="remove-flags")
-            if not input_arg.get('only_eval', False):
-                data_train = data_train.map(encode_dataset, fn_kwargs={'processor': processor,
-                                                                       'is_phonemize': is_phonemize,
-                                                                       'separator': separator,
-                                                                       'backend': backend})
-            data_test = data_test.map(encode_dataset,
-                                      fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize,
-                                                 'separator': separator, 'backend': backend})
-        else:
-            if not input_arg.get('only_eval', False):
-                data_train = data_train.map(encode_dataset,
-                                            fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
-            data_test = data_test.map(encode_dataset,
-                                      fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
+        if 'openai/whisper' in input_arg['model_config']:
+            if is_phonemize:
+                from phonemizer.backend import EspeakBackend
+                from phonemizer.separator import Separator
+                separator = Separator(phone="", word="", syllable="")
+                backend = EspeakBackend(language="en-us", language_switch="remove-flags")
+                if not input_arg.get('only_eval', False):
+                    data_train = data_train.map(encode_dataset, fn_kwargs={'processor': processor,
+                                                                           'is_phonemize': is_phonemize,
+                                                                           'separator': separator,
+                                                                           'backend': backend})
+                data_test = data_test.map(encode_dataset,
+                                          fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize,
+                                                     'separator': separator, 'backend': backend})
+            else:
+                if not input_arg.get('only_eval', False):
+                    data_train = data_train.map(encode_dataset,
+                                                fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
+                data_test = data_test.map(encode_dataset,
+                                          fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
         print("after encoding dataset")
         print("data train", data_train)
         print("data test", data_test)
