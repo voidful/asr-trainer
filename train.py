@@ -4,7 +4,7 @@ import nlp2
 from datasets import load_dataset, Audio
 from transformers import Seq2SeqTrainer
 from transformers import Trainer
-from transformers import TrainingArguments
+from transformers import TrainingArguments, Seq2SeqTrainingArguments
 from transformers import Wav2Vec2CTCTokenizer
 from transformers import Wav2Vec2FeatureExtractor
 from transformers import Wav2Vec2Processor
@@ -189,7 +189,16 @@ def main(arg=None):
             use_auth_token=input_arg['use_auth_token'],
             ignore_mismatched_sizes=True
         )
-    training_args = TrainingArguments(
+
+    if 'openai/whisper' in input_arg['model_config']:
+        trainer_class = Seq2SeqTrainer
+        trainer_aug_class = Seq2SeqTrainingArguments
+    else:
+        trainer_class = Trainer
+        trainer_aug_class = TrainingArguments
+        model.gradient_checkpointing_enable()
+
+    training_args = trainer_aug_class(
         output_dir=input_arg.get("output_dir", repo_name),
         length_column_name="lengths",
         group_by_length=input_arg["group_by_length"],
@@ -211,7 +220,6 @@ def main(arg=None):
         greater_is_better=False,
         metric_for_best_model='cer',
         num_train_epochs=input_arg.get('epoch', 60),
-        gradient_checkpointing=True,
         fp16=True,
         logging_steps=input_arg.get('logging_steps', 10),
         learning_rate=input_arg.get('learning_rate', 2.34e-4),
@@ -220,7 +228,6 @@ def main(arg=None):
         push_to_hub=False,
         report_to="all"
     )
-    model.gradient_checkpointing_enable()
 
     def compute_metrics(pred):
         pred_ids = pred.predictions
@@ -235,10 +242,6 @@ def main(arg=None):
         nlp2.write_csv([[l, p, cer_cal([l], [p])] for l, p in zip(label_str, pred_str)], 'pred.csv')
         return {"cer": cer, "wer": wer}
 
-    if 'openai/whisper' in input_arg['model_config']:
-        trainer_class = Seq2SeqTrainer
-    else:
-        trainer_class = Trainer
     trainer = trainer_class(
         model=model,
         data_collator=data_collator,
