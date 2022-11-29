@@ -1,0 +1,5 @@
+transformers>=4.11.3
+datasets>=1.13.3
+torchaudio>=0.4.0
+librosa
+editdistance
