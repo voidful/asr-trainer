@@ -1,6 +1,6 @@
-# xls-r-fine-tuning
+# one script for xls-r/xlsr/whisper fine-tuning
 
-xls-r fine-tuning script modify from https://huggingface.co/blog/fine-tune-xlsr-wav2vec2
+script modify from https://huggingface.co/blog/fine-tune-xlsr-wav2vec2
 
 - fix large memory usage during eval metric calculation
 - add cer and wer for evaluation
@@ -71,6 +71,17 @@ train.py --tokenize_config facebook/hubert-large-ls960-ft \
 --epoch 150 \
 --use_auth_token True \
 --output_dir ./model_sweep \
+--overwrite_output_dir
+```
+
+Train whisper on custom dataset
+```shell
+python train.py --tokenize_config openai/whisper-base \
+--model_config openai/whisper-base \
+--group_by_length \
+--custom_set_train cm_train_unified.csv \
+--custom_set_test cm_dev_unified.csv \
+--output_dir ./whisper-custom \
 --overwrite_output_dir
 ```
 
