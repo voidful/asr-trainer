@@ -22,10 +22,10 @@ def encode_dataset(batch, processor, is_phonemize, backend=None, separator=None)
     return batch
 
 
-def prepare_dataset_hf(batch, processor):
+def prepare_dataset_hf(batch, processor, audio_feature_key):
     audio = batch["audio"]
-    batch["input_features"] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).input_values[0]
-    batch["lengths"] = len(batch["input_features"])
+    batch[audio_feature_key] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).get(audio_feature_key)[0]
+    batch["lengths"] = len(batch[audio_feature_key])
     if 'sentence' in batch:
         batch["labels"] = batch["sentence"]
     else:
@@ -33,15 +33,15 @@ def prepare_dataset_hf(batch, processor):
     return batch
 
 
-def prepare_dataset_custom(batch):
+def prepare_dataset_custom(batch, audio_feature_key):
     path = batch["path"]
     speech, sampling_rate = torchaudio.load(path)
     if sampling_rate != '16_000' or sampling_rate != '16000':
         resampler = torchaudio.transforms.Resample(orig_freq=sampling_rate, new_freq=16_000)
-        batch["input_features"] = resampler.forward(speech.squeeze(0)).numpy()
+        batch[audio_feature_key] = resampler.forward(speech.squeeze(0)).numpy()
     else:
-        batch["input_features"] = speech.squeeze(0).numpy()
-    batch["lengths"] = len(batch["input_features"])
+        batch[audio_feature_key] = speech.squeeze(0).numpy()
+    batch["lengths"] = len(batch[audio_feature_key])
     if 'sentence' in batch:
         batch["labels"] = batch["sentence"]
     else:
@@ -51,8 +51,9 @@ def prepare_dataset_custom(batch):
 
 def prepare_dataset_whisper(batch, feature_extractor):
     # compute log-Mel input features from input audio array
+    print(batch)
     if 'input_values' in batch:
-        batch["input_features"] = feature_extractor(batch["input_values"], sampling_rate=16000).input_features[0]
+        batch["input_values"] = feature_extractor(batch["input_values"], sampling_rate=16000).input_features[0]
     else:
         batch["input_features"] = feature_extractor(batch["input_features"], sampling_rate=16000).input_features[0]
 
@@ -65,15 +66,16 @@ def prepare_dataset_whisper(batch, feature_extractor):
 class DataCollatorCTCWithPadding:
     processor: Wav2Vec2Processor
     padding: Union[bool, str] = True
+    audio_feature_key: str = "input_values"
 
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-        # split inputs and labels since they have to be of different lenghts and need
+        # split inputs and labels since they have to be of different length and need
         # different padding methods
-        input_features = [{"input_features": feature["input_features"]} for feature in features]
+        input_values = [{self.audio_feature_key: feature[self.audio_feature_key]} for feature in features]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
 
         batch = self.processor.pad(
-            input_features,
+            input_values,
             padding=self.padding,
             return_tensors="pt",
         )
@@ -94,11 +96,12 @@ class DataCollatorCTCWithPadding:
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:
     processor: Any
+    audio_feature_key: str = "input_features"
 
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
         # split inputs and labels since they have to be of different lengths and need different padding methods
         # first treat the audio inputs by simply returning torch tensors
-        input_features = [{"input_features": feature["input_features"]} for feature in features]
+        input_features = [{self.audio_feature_key: feature[self.audio_feature_key]} for feature in features]
         batch = self.processor.feature_extractor.pad(input_features, return_tensors="pt")
 
         # get the tokenized label sequences

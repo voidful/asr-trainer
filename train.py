@@ -1,3 +1,5 @@
+import inspect
+import random
 import sys
 
 import nlp2
@@ -11,11 +13,10 @@ from transformers import Wav2Vec2Processor
 from transformers import WhisperFeatureExtractor
 from transformers import WhisperForConditionalGeneration
 from transformers import WhisperProcessor
-from transformers import WhisperTokenizer
 
 from module.args import parse_args
 from module.data_processing import encode_dataset, DataCollatorCTCWithPadding, prepare_dataset_hf, \
-    prepare_dataset_custom, DataCollatorSpeechSeq2SeqWithPadding, prepare_dataset_whisper
+    prepare_dataset_custom, DataCollatorSpeechSeq2SeqWithPadding
 from module.metric import cer_cal, wer_cal
 from module.model import Wav2Vec2ForCTC
 from module.utility import FreezingCallback
@@ -29,9 +30,13 @@ def main(arg=None):
 
     if 'openai/whisper' in input_arg['model_config']:
         feature_extractor = WhisperFeatureExtractor.from_pretrained(input_arg['model_config'])
-        tokenizer = WhisperTokenizer.from_pretrained(input_arg['model_config'], task="transcribe")
         processor = WhisperProcessor.from_pretrained(input_arg['model_config'], task="transcribe")
         processor.save_pretrained(repo_name)
+        model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-small")
+        model.config.forced_decoder_ids = None
+        model.config.suppress_tokens = []
+        audio_feature_key = inspect.getfullargspec(model.forward).args[1]
+        data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, audio_feature_key=audio_feature_key)
     else:
         tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(input_arg['tokenize_config'],
                                                          use_auth_token=input_arg['use_auth_token'])
@@ -40,6 +45,24 @@ def main(arg=None):
                                                      return_attention_mask=True)
         processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
         processor.save_pretrained(repo_name)
+        model = Wav2Vec2ForCTC.from_pretrained(
+            input_arg['model_config'],
+            activation_dropout=input_arg.get('activation_dropout', 0.01),
+            attention_dropout=input_arg.get('attention_dropout', 0.01),
+            feat_proj_dropout=input_arg.get('feat_proj_dropout', 0.01),
+            feat_quantizer_dropout=input_arg.get('feat_quantizer_dropout', 0.01),
+            final_dropout=input_arg.get('final_dropout', 0.01),
+            hidden_dropout=input_arg.get('hidden_dropout', 0.01),
+            layerdrop=0.0,
+            ctc_loss_reduction="mean",
+            pad_token_id=processor.tokenizer.pad_token_id,
+            vocab_size=len(processor.tokenizer),
+            use_auth_token=input_arg['use_auth_token'],
+            ignore_mismatched_sizes=True
+        )
+        audio_feature_key = inspect.getfullargspec(model.forward).args[1]
+        data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True,
+                                                   audio_feature_key=audio_feature_key)
 
     # data set
     if 'custom_set_train' in input_arg:
@@ -55,13 +78,14 @@ def main(arg=None):
             data_test = dataset['test']
 
         data_train = dataset['train']
-        data_train = data_train.map(prepare_dataset_custom, num_proc=input_arg["num_proc"])
-        data_test = data_test.map(prepare_dataset_custom, num_proc=input_arg["num_proc"])
-
+        data_train = data_train.map(prepare_dataset_custom, num_proc=input_arg["num_proc"],
+                                    fn_kwargs={'audio_feature_key': audio_feature_key})
+        data_test = data_test.map(prepare_dataset_custom, num_proc=input_arg["num_proc"],
+                                  fn_kwargs={'audio_feature_key': audio_feature_key})
     elif 'train_set' in input_arg:
         data_train = load_dataset(input_arg['train_set'], input_arg['train_subset'],
                                   split=input_arg['train_split'], use_auth_token=input_arg['use_auth_token'])
-        data_test = load_dataset(input_arg['test_set'],
+        data_test = load_dataset(input_arg.get('test_set', input_arg['train_set']),
                                  input_arg['test_subset'] if 'test_subset' in input_arg else input_arg['train_subset'],
                                  split=input_arg['test_split'],
                                  use_auth_token=input_arg['use_auth_token'])
@@ -72,19 +96,16 @@ def main(arg=None):
                 ["accent", "age", "client_id", "down_votes", "gender", "locale", "segment", "up_votes"])
         except:
             pass
+
         data_train = data_train.cast_column("audio", Audio(sampling_rate=16_000))
         data_test = data_test.cast_column("audio", Audio(sampling_rate=16_000))
-        data_train = data_train.map(prepare_dataset_hf, fn_kwargs={'processor': processor},
+
+        data_train = data_train.map(prepare_dataset_hf,
+                                    fn_kwargs={'processor': processor, 'audio_feature_key': audio_feature_key},
                                     remove_columns=data_train.column_names)
-        data_test = data_test.map(prepare_dataset_hf, fn_kwargs={'processor': processor},
+        data_test = data_test.map(prepare_dataset_hf,
+                                  fn_kwargs={'processor': processor, 'audio_feature_key': audio_feature_key},
                                   remove_columns=data_test.column_names)
-
-    if 'openai/whisper' in input_arg['model_config']:
-        data_train = data_train.map(prepare_dataset_whisper, fn_kwargs={'feature_extractor': feature_extractor},
-                                    num_proc=input_arg["num_proc"])
-        data_test = data_test.map(prepare_dataset_whisper, fn_kwargs={'feature_extractor': feature_extractor},
-                                  num_proc=input_arg["num_proc"])
-
     print("init dataset")
     print("data train", data_train)
     print("data test", data_test)
@@ -125,26 +146,25 @@ def main(arg=None):
         print("data train", data_train)
         print("data test", data_test)
         is_phonemize = input_arg['phoneme']
-        if 'openai/whisper' in input_arg['model_config']:
-            if is_phonemize:
-                from phonemizer.backend import EspeakBackend
-                from phonemizer.separator import Separator
-                separator = Separator(phone="", word="", syllable="")
-                backend = EspeakBackend(language="en-us", language_switch="remove-flags")
-                if not input_arg.get('only_eval', False):
-                    data_train = data_train.map(encode_dataset, fn_kwargs={'processor': processor,
-                                                                           'is_phonemize': is_phonemize,
-                                                                           'separator': separator,
-                                                                           'backend': backend})
-                data_test = data_test.map(encode_dataset,
-                                          fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize,
-                                                     'separator': separator, 'backend': backend})
-            else:
-                if not input_arg.get('only_eval', False):
-                    data_train = data_train.map(encode_dataset,
-                                                fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
-                data_test = data_test.map(encode_dataset,
-                                          fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
+        if is_phonemize:
+            from phonemizer.backend import EspeakBackend
+            from phonemizer.separator import Separator
+            separator = Separator(phone="", word="", syllable="")
+            backend = EspeakBackend(language="en-us", language_switch="remove-flags")
+            if not input_arg.get('only_eval', False):
+                data_train = data_train.map(encode_dataset, fn_kwargs={'processor': processor,
+                                                                       'is_phonemize': is_phonemize,
+                                                                       'separator': separator,
+                                                                       'backend': backend})
+            data_test = data_test.map(encode_dataset,
+                                      fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize,
+                                                 'separator': separator, 'backend': backend})
+        else:
+            if not input_arg.get('only_eval', False):
+                data_train = data_train.map(encode_dataset,
+                                            fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
+            data_test = data_test.map(encode_dataset,
+                                      fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
         print("after encoding dataset")
         print("data train", data_train)
         print("data test", data_test)
@@ -168,29 +188,6 @@ def main(arg=None):
         data_test = data_train
 
     if 'openai/whisper' in input_arg['model_config']:
-        data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
-        model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-small")
-        model.config.forced_decoder_ids = None
-        model.config.suppress_tokens = []
-    else:
-        data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
-        model = Wav2Vec2ForCTC.from_pretrained(
-            input_arg['model_config'],
-            activation_dropout=input_arg.get('activation_dropout', 0.01),
-            attention_dropout=input_arg.get('attention_dropout', 0.01),
-            feat_proj_dropout=input_arg.get('feat_proj_dropout', 0.01),
-            feat_quantizer_dropout=input_arg.get('feat_quantizer_dropout', 0.01),
-            final_dropout=input_arg.get('final_dropout', 0.01),
-            hidden_dropout=input_arg.get('hidden_dropout', 0.01),
-            layerdrop=0.0,
-            ctc_loss_reduction="mean",
-            pad_token_id=processor.tokenizer.pad_token_id,
-            vocab_size=len(processor.tokenizer),
-            use_auth_token=input_arg['use_auth_token'],
-            ignore_mismatched_sizes=True
-        )
-
-    if 'openai/whisper' in input_arg['model_config']:
         trainer_class = Seq2SeqTrainer
         trainer_aug_class = Seq2SeqTrainingArguments
     else:
@@ -211,9 +208,6 @@ def main(arg=None):
         save_steps=input_arg.get('eval_steps', 400),
         eval_steps=input_arg.get('eval_steps', 400),
         ddp_find_unused_parameters=True,
-        # evaluation_strategy="epoch",
-        predict_with_generate=True,
-        generation_max_length=225,
         resume_from_checkpoint=input_arg.get("checkpoint", False),
         overwrite_output_dir=input_arg.get("overwrite_output_dir", False),
         load_best_model_at_end=True,
@@ -228,6 +222,9 @@ def main(arg=None):
         push_to_hub=False,
         report_to="all"
     )
+    if 'openai/whisper' in input_arg['model_config']:
+        training_args.predict_with_generate = True
+        training_args.generation_max_length = 225
 
     def compute_metrics(pred):
         pred_ids = pred.predictions
@@ -239,7 +236,15 @@ def main(arg=None):
         label_str = processor.tokenizer.batch_decode(label_ids, skip_special_tokens=True, group_tokens=False)
         cer = cer_cal(label_str, pred_str)
         wer = wer_cal(label_str, pred_str)
-        nlp2.write_csv([[l, p, cer_cal([l], [p])] for l, p in zip(label_str, pred_str)], 'pred.csv')
+        pred_result = [[l, p, cer_cal([l], [p])] for l, p in zip(label_str, pred_str)]
+        nlp2.write_csv(pred_result, 'pred.csv')
+        # print 10 predict result randomly for debug
+        random.shuffle(pred_result)
+        print("pred_result")
+        print("=================================")
+        for i in range(10):
+            print(pred_result[i])
+        print("=================================")
         return {"cer": cer, "wer": wer}
 
     trainer = trainer_class(

@@ -29,7 +29,7 @@ class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
 
     def forward(
             self,
-            input_features,
+            input_values,
             attention_mask=None,
             output_attentions=None,
             output_hidden_states=None,
@@ -38,7 +38,7 @@ class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         outputs = self.wav2vec2(
-            input_features,
+            input_values,
             attention_mask=attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
@@ -57,7 +57,7 @@ class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
 
             # retrieve loss input_lengths from attention_mask
             attention_mask = (
-                attention_mask if attention_mask is not None else torch.ones_like(input_features, dtype=torch.long)
+                attention_mask if attention_mask is not None else torch.ones_like(input_values, dtype=torch.long)
             )
             input_lengths = self._get_feat_extract_output_lengths(attention_mask.sum(-1)).to(torch.long)
 
