@@ -42,3 +42,21 @@ def parse_args(args):
     input_arg = {k: v for k, v in vars(input_arg).items() if v is not None}
     other_arg = {k.replace("--", ""): v for k, v in zip(model_arg[:-1:2], model_arg[1::2])}
     return input_arg, other_arg
+
+
+def parse_args_create_tokenizer(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--custom_set_train", type=str)
+    parser.add_argument("--custom_set_test", type=str)
+    parser.add_argument("--train_set", type=str)
+    parser.add_argument("--train_subset", type=str)
+    parser.add_argument("--train_split", type=str)
+    parser.add_argument("--test_set", type=str)
+    parser.add_argument("--test_subset", type=str)
+    parser.add_argument("--test_split", type=str)
+    parser.add_argument("--vocab_list", type=str)
+    parser.add_argument("--output_dir", type=str)
+    input_arg, model_arg = parser.parse_known_args(args)
+    input_arg = {k: v for k, v in vars(input_arg).items() if v is not None}
+    other_arg = {k.replace("--", ""): v for k, v in zip(model_arg[:-1:2], model_arg[1::2])}
+    return input_arg, other_arg
