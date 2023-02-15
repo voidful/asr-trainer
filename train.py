@@ -17,6 +17,7 @@ from transformers import WhisperProcessor
 from module.args import parse_args
 from module.data_processing import encode_dataset, DataCollatorCTCWithPadding, prepare_dataset_hf, \
     prepare_dataset_custom, DataCollatorSpeechSeq2SeqWithPadding
+from module.g2p import G2P
 from module.metric import cer_cal, wer_cal
 from module.model import Wav2Vec2ForCTC
 from module.utility import FreezingCallback
@@ -145,26 +146,29 @@ def main(arg=None):
         print("before encoding dataset")
         print("data train", data_train)
         print("data test", data_test)
-        is_phonemize = input_arg['phoneme']
-        if is_phonemize:
-            from phonemizer.backend import EspeakBackend
-            from phonemizer.separator import Separator
-            separator = Separator(phone="", word="", syllable="")
-            backend = EspeakBackend(language="en-us", language_switch="remove-flags")
+        phonemize = input_arg.get('phoneme', False)
+        if phonemize:
+            if 'g2p' in phonemize:
+                backend = G2P()
+            else:
+                from phonemizer.backend import EspeakBackend
+                from phonemizer.separator import Separator
+                separator = Separator(phone="", word="", syllable="")
+                backend = EspeakBackend(language="en-us", language_switch="remove-flags")
             if not input_arg.get('only_eval', False):
                 data_train = data_train.map(encode_dataset, fn_kwargs={'processor': processor,
-                                                                       'is_phonemize': is_phonemize,
+                                                                       'phonemize': phonemize,
                                                                        'separator': separator,
                                                                        'backend': backend})
             data_test = data_test.map(encode_dataset,
-                                      fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize,
+                                      fn_kwargs={'processor': processor, 'phonemize': phonemize,
                                                  'separator': separator, 'backend': backend})
         else:
             if not input_arg.get('only_eval', False):
                 data_train = data_train.map(encode_dataset,
-                                            fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
+                                            fn_kwargs={'processor': processor})
             data_test = data_test.map(encode_dataset,
-                                      fn_kwargs={'processor': processor, 'is_phonemize': is_phonemize})
+                                      fn_kwargs={'processor': processor})
         print("after encoding dataset")
         print("data train", data_train)
         print("data test", data_test)

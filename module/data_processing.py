@@ -6,11 +6,14 @@ import torchaudio
 from transformers import Wav2Vec2Processor
 
 
-def encode_dataset(batch, processor, is_phonemize, backend=None, separator=None):
+def encode_dataset(batch, processor, phonemize=False, backend=None, separator=None):
     if not isinstance(batch["labels"], list):
-        if is_phonemize:
+        if phonemize:
             with processor.as_target_processor():
-                batch["labels"] = processor(backend.phonemize([batch["labels"]], separator=separator)[0]).input_ids
+                if phonemize == 'g2p':
+                    batch["labels"] = processor(backend.encode(batch["labels"])).input_ids
+                else:
+                    batch["labels"] = processor(backend.phonemize([batch["labels"]], separator=separator)[0]).input_ids
         else:
             try:
                 with processor.as_target_processor():
