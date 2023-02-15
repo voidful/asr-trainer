@@ -150,6 +150,7 @@ def main(arg=None):
         if phonemize:
             if 'g2p' in phonemize:
                 backend = G2P()
+                separator = None
             else:
                 from phonemizer.backend import EspeakBackend
                 from phonemizer.separator import Separator
