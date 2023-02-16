@@ -149,12 +149,12 @@ def main(arg=None):
         phonemize = input_arg.get('phoneme', False)
         if phonemize:
             if 'g2p' in phonemize:
-                backend = G2P()
+                backend = G2P(delimiter=tokenizer.word_delimiter_token)
                 separator = None
             else:
                 from phonemizer.backend import EspeakBackend
                 from phonemizer.separator import Separator
-                separator = Separator(phone="", word="", syllable="")
+                separator = Separator(phone="", word=tokenizer.word_delimiter_token, syllable="")
                 backend = EspeakBackend(language="en-us", language_switch="remove-flags")
             if not input_arg.get('only_eval', False):
                 data_train = data_train.map(encode_dataset, fn_kwargs={'processor': processor,

@@ -46,9 +46,9 @@ class G2P:
         allow_unk (bool): If false, raise Error when a word can not be recognized by this basic G2P
     """
 
-    def __init__(self, file_list: List[str] = None, allow_unk: bool = False):
+    def __init__(self, delimiter=" ",file_list: List[str] = None, allow_unk: bool = False):
         self.allow_unk = allow_unk
-
+        self.delimiter = delimiter
         if file_list is None:
             file_list = [nlp2.download_file(i, './g2p-data') for i in DEFAULT_LEXICON_URL]
         self.word2phone = read_lexicon_files(file_list)
@@ -68,4 +68,4 @@ class G2P:
                 assert word in self.word2phone
             phonemes += self.word2phone.get(word, ["<UNK>"])
 
-        return "".join(phonemes)
+        return self.delimiter.join(phonemes)
