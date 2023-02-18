@@ -234,7 +234,7 @@ def main(arg=None):
     def compute_metrics(pred):
         pred_ids = pred.predictions
         pred_ids = [i[i != -100] for i in pred_ids]
-        pred_str = processor.tokenizer.batch_decode(pred_ids, skip_special_tokens=True, group_tokens=False)
+        pred_str = processor.tokenizer.batch_decode(pred_ids, skip_special_tokens=True, group_tokens=True)
         # we do not want to group tokens when computing the metrics
         label_ids = pred.label_ids
         label_ids = [i[i != -100] for i in label_ids]

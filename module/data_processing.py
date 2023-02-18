@@ -54,7 +54,6 @@ def prepare_dataset_custom(batch, audio_feature_key):
 
 def prepare_dataset_whisper(batch, feature_extractor):
     # compute log-Mel input features from input audio array
-    print(batch)
     if 'input_values' in batch:
         batch["input_values"] = feature_extractor(batch["input_values"], sampling_rate=16000).input_features[0]
     else:
