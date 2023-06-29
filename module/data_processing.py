@@ -52,15 +52,23 @@ def prepare_dataset_custom(batch, audio_feature_key):
     return batch
 
 
-def prepare_dataset_whisper(batch, feature_extractor):
-    # compute log-Mel input features from input audio array
-    if 'input_values' in batch:
-        batch["input_values"] = feature_extractor(batch["input_values"], sampling_rate=16000).input_features[0]
+def prepare_dataset_whisper(batch, feature_extractor, audio_feature_key):
+    path = batch["path"]
+    speech, sampling_rate = torchaudio.load(path)
+    if sampling_rate != "16_000" or sampling_rate != "16000":
+        resampler = torchaudio.transforms.Resample(orig_freq=sampling_rate, new_freq=16_000)
+        batch[audio_feature_key] = resampler.forward(speech.squeeze(0)).numpy()
     else:
-        batch["input_features"] = feature_extractor(batch["input_features"], sampling_rate=16000).input_features[0]
-
+        batch[audio_feature_key] = speech.squeeze(0).numpy()
+    # compute log-Mel input features from input audio array
+    batch[audio_feature_key] = feature_extractor(batch[audio_feature_key], sampling_rate=16000).input_features[0]
+    batch["lengths"] = len(batch[audio_feature_key])
     # # encode target text to label ids
     # batch["labels"] = tokenizer(batch["sentence"]).input_ids
+    if "sentence" in batch:
+        batch["labels"] = batch["sentence"]
+    else:
+        batch["labels"] = batch["text"]
     return batch
 
 
