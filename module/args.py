@@ -20,6 +20,7 @@ def parse_args(args):
     parser.add_argument("--logging_steps", type=int)
     parser.add_argument("--eval_steps", type=int)
     parser.add_argument("--phoneme", choices=["espeak", "g2p"])
+    parser.add_argument("--unit", choices=['hubert_layer9_code500', 'hubert_layer9_code500_norm_beam'])
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--checkpoint", type=str)
     parser.add_argument("--overwrite_output_dir", action="store_true")

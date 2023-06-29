@@ -6,7 +6,8 @@ import torchaudio
 from transformers import Wav2Vec2Processor
 
 
-def encode_dataset(batch, processor, phonemize=False, backend=None, separator=None):
+def encode_dataset(batch, processor, phonemize=False, unitmize=None, unitparameter=None, backend=None, separator=None,
+                   subdata=None):
     if not isinstance(batch["labels"], list):
         if phonemize:
             with processor.as_target_processor():
@@ -14,6 +15,10 @@ def encode_dataset(batch, processor, phonemize=False, backend=None, separator=No
                     batch["labels"] = processor(backend.encode(batch["labels"])).input_ids
                 else:
                     batch["labels"] = processor(backend.phonemize([batch["labels"]], separator=separator)[0]).input_ids
+        elif unitmize:
+            code_dict = unitmize(input_values=torch.as_tensor(batch["input_values"]).unsqueeze(0), **unitparameter)
+            code = code_dict['beam_merged_code'] if 'beam_merged_code' in code_dict else code_dict['merged_code']
+            batch["labels"] = processor(''.join([str(c) for c in code])).input_ids
         else:
             try:
                 with processor.as_target_processor():

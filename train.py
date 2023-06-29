@@ -2,7 +2,7 @@ import inspect
 import random
 import sys
 
-import nlp2
+from asrp import HubertCode
 from datasets import load_dataset, Audio
 from transformers import Seq2SeqTrainer
 from transformers import Trainer
@@ -147,6 +147,7 @@ def main(arg=None):
         print("data train", data_train)
         print("data test", data_test)
         phonemize = input_arg.get('phoneme', False)
+        unitmize = input_arg.get('unit', False)
         if phonemize:
             if 'g2p' in phonemize:
                 backend = G2P(delimiter=tokenizer.word_delimiter_token)
@@ -164,6 +165,30 @@ def main(arg=None):
             data_test = data_test.map(encode_dataset,
                                       fn_kwargs={'processor': processor, 'phonemize': phonemize,
                                                  'separator': separator, 'backend': backend})
+        elif unitmize:
+            import nlp2
+            if unitmize == 'hubert_layer9_code500':
+                nlp2.download_file(
+                    'https://dl.fbaipublicfiles.com/hubert/hubert_base_ls960_L9_km500.bin', './')
+                hc = HubertCode("facebook/hubert-base-ls960", './hubert_base_ls960_L9_km500.bin', 9,
+                                chunk_sec=30,
+                                return_diff=False,
+                                worker=20, batch=60)
+                unit_parameter = {'beamsearch': False, 'feat_norm': False}
+            elif unitmize == 'hubert_layer9_code500_norm_beam':
+                nlp2.download_file(
+                    'https://dl.fbaipublicfiles.com/hubert/hubert_base_ls960_L9_km500.bin', './')
+                hc = HubertCode("facebook/hubert-base-ls960", './hubert_base_ls960_L9_km500.bin', 9,
+                                chunk_sec=30,
+                                return_diff=False,
+                                worker=20, batch=60)
+                unit_parameter = {'beamsearch': True, 'top_k': 10, 'beamsize': 5, 'feat_norm': True}
+            if not input_arg.get('only_eval', False):
+                data_train = data_train.map(encode_dataset, fn_kwargs={'processor': processor.tokenizer, 'unitmize': hc,
+                                                                       'unitparameter': unit_parameter})
+            data_test = data_test.map(encode_dataset,
+                                      fn_kwargs={'processor': processor.tokenizer, 'unitmize': hc,
+                                                 'unitparameter': unit_parameter})
         else:
             if not input_arg.get('only_eval', False):
                 data_train = data_train.map(encode_dataset,
